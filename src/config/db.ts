@@ -1,8 +1,12 @@
+import dns from "node:dns"
 import mongoose from "mongoose"
 import { env } from "./env.js"
 
 export async function connectDB(): Promise<void> {
   mongoose.set("strictQuery", true)
+
+  const dnsServers = env.DNS_SERVERS?.split(",").map((s) => s.trim()).filter(Boolean)
+  if (dnsServers?.length) dns.setServers(dnsServers)
 
   try {
     await mongoose.connect(env.MONGODB_URI)

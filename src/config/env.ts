@@ -5,6 +5,9 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
   MONGODB_URI: z.string().min(1, "MONGODB_URI est requis"),
+  // Optional DNS servers (comma separated) for mongodb+srv:// lookups: on some
+  // Windows setups Node queries 127.0.0.1, which refuses SRV requests.
+  DNS_SERVERS: z.string().optional(),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   JWT_SECRET: z.string().min(32, "JWT_SECRET doit faire au moins 32 caractères"),
   JWT_EXPIRES_IN: z.string().default("30d"),
