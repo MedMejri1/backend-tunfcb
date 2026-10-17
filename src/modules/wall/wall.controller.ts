@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express"
 import { z } from "zod"
 import { HttpError } from "../../middlewares/errorHandler.js"
+import { MAX_IMAGE_BASE64 } from "../../utils/images.js"
 import { getSettings } from "../settings/settings.service.js"
 import type { UserDocument } from "../users/user.model.js"
 import {
@@ -12,6 +13,8 @@ import {
   WallImageModel,
 } from "./wall.model.js"
 import {
+  FEED_FILTERS,
+  FEED_SORTS,
   addComment,
   createPost,
   deleteMyComment,
@@ -37,7 +40,20 @@ async function wallStatus(user: UserDocument) {
   return { enabled: wall.enabled, blocked: Boolean(user.wallBlocked), maxPostsPerDay: wall.maxPostsPerDay }
 }
 
-/** Feed, newest first. */
+// Older app versions send neither sort nor filter: newest first, every post.
+const feedSchema = z
+  .object({
+    sort: z.enum(FEED_SORTS).default("recent"),
+    filter: z.enum(FEED_FILTERS).default("all"),
+    cursor: z.string().max(24).optional(),
+    limit: z.coerce.number().int().min(1).max(30).default(10),
+  })
+  .refine(
+    (q) => !q.cursor || (q.sort === "recent" ? objectId.safeParse(q.cursor).success : /^\d{1,5}$/.test(q.cursor)),
+    { message: "Curseur invalide", path: ["cursor"] },
+  )
+
+/** Feed: newest first, most relevant or top of the week, optionally photos only or own posts. */
 export const feed: RequestHandler = async (req, res) => {
   const user = req.appUser!
   const status = await wallStatus(user)
@@ -45,8 +61,7 @@ export const feed: RequestHandler = async (req, res) => {
     res.json({ wall: status, items: [], nextCursor: null })
     return
   }
-  const { cursor, limit } = pageSchema.parse(req.query)
-  res.json({ wall: status, ...(await listFeed(user._id, { before: cursor, limit })) })
+  res.json({ wall: status, ...(await listFeed(user._id, feedSchema.parse(req.query))) })
 }
 
 const createSchema = z.object({
@@ -54,8 +69,7 @@ const createSchema = z.object({
   images: z
     .array(
       z.object({
-        // Base64 of a photo of at most 1.5 MB (checked again once decoded).
-        data: z.string().min(100).max(2_100_000, "Photo trop lourde (1,5 Mo maximum)"),
+        data: z.string().min(100).max(MAX_IMAGE_BASE64, "Photo trop lourde (1,5 Mo maximum)"),
         width: z.number().int().min(1).max(10_000),
         height: z.number().int().min(1).max(10_000),
       }),

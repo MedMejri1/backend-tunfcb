@@ -2,10 +2,11 @@ import type { RequestHandler } from "express"
 import type { Types } from "mongoose"
 import { z } from "zod"
 import { HttpError } from "../../middlewares/errorHandler.js"
+import { decodeImage, MAX_IMAGE_BASE64 } from "../../utils/images.js"
 import { escapeRegex, paginated, paginationSchema } from "../../utils/pagination.js"
 import { NotificationModel } from "../notifications/notification.model.js"
 import { pushToUsers } from "../push/push.service.js"
-import { CAFE_AMENITIES, CAFE_STATUSES, CafeModel, type Cafe, type CafeStatus } from "./cafe.model.js"
+import { CAFE_AMENITIES, CAFE_STATUSES, CafeModel, CafePhotoModel, type Cafe, type CafeStatus } from "./cafe.model.js"
 import { getGovernorates, resolveLocation } from "./locations.service.js"
 
 type CafeDoc = Cafe & { _id: Types.ObjectId; createdAt: Date; updatedAt: Date }
@@ -15,6 +16,9 @@ type AdminCafeSource = Omit<CafeDoc, "submittedBy"> & { submittedBy?: Submitter 
 
 // Anti-spam: requests waiting for review per supporter.
 const MAX_PENDING_PER_USER = 3
+
+const objectId = z.string().regex(/^[a-f0-9]{24}$/i)
+const cafePhotoUrl = (id: Types.ObjectId) => `/api/cafes/photos/${id}`
 
 /** What every app user sees (the phone only if the manager agreed). */
 const presentCafe = (c: Omit<CafeDoc, "submittedBy">) => ({
@@ -29,6 +33,7 @@ const presentCafe = (c: Omit<CafeDoc, "submittedBy">) => ({
   screens: c.screens ?? null,
   amenities: c.amenities ?? [],
   description: c.description ?? "",
+  photoUrl: c.photo ? cafePhotoUrl(c.photo) : null,
   phone: c.showPhone ? c.phone : null,
 })
 
@@ -71,6 +76,8 @@ const cafeFields = {
   screens: z.number().int().min(1).max(50).nullable(),
   amenities: z.array(z.enum(CAFE_AMENITIES)).max(CAFE_AMENITIES.length),
   description: z.string().trim().max(300),
+  // Front of the café in base64 (JPG, PNG or WebP). On an update, null removes it.
+  photo: z.string().min(100).max(MAX_IMAGE_BASE64, "Photo trop lourde (1,5 Mo maximum)").nullable(),
   managerName: z.string().trim().min(2, "Indique ton nom").max(80),
   phone: phoneSchema,
   showPhone: z.boolean(),
@@ -82,11 +89,31 @@ const cafeSchema = z.object({
   screens: cafeFields.screens.default(null),
   amenities: cafeFields.amenities.default([]),
   description: cafeFields.description.default(""),
+  photo: cafeFields.photo.default(null),
   showPhone: cafeFields.showPhone.default(true),
 })
 
 // No defaults here: with zod 4 a default still fills a missing key under .partial().
 const cafeUpdateSchema = z.object(cafeFields).partial()
+
+/** Saves the photo apart from the café; returns its id. */
+async function savePhoto(base64: string) {
+  const { data, contentType } = decodeImage(base64)
+  const photo = await CafePhotoModel.create({ data, contentType, size: data.length })
+  return photo._id
+}
+
+/** Creates the café with its photo, without leaving an orphan photo if the café fails. */
+async function createCafe(input: z.infer<typeof cafeSchema>, fields: Partial<Cafe>) {
+  const { photo, ...rest } = input
+  const photoId = photo ? await savePhoto(photo) : null
+  try {
+    return await CafeModel.create({ ...rest, ...fields, photo: photoId })
+  } catch (err) {
+    if (photoId) await CafePhotoModel.deleteOne({ _id: photoId })
+    throw err
+  }
+}
 
 const filtersSchema = z.object({
   governorate: z.string().trim().optional(),
@@ -130,6 +157,28 @@ export const listCafes: RequestHandler = async (req, res) => {
   })
 }
 
+/** A published café's page. */
+export const getCafe: RequestHandler = async (req, res) => {
+  const id = objectId.safeParse(req.params.id)
+  const cafe = id.success ? await CafeModel.findOne({ _id: id.data, status: "approved" }).lean<CafeDoc>() : null
+  if (!cafe) throw new HttpError(404, "Ce café n’est plus dans la liste")
+  res.json({ cafe: presentCafe(cafe) })
+}
+
+/** Public: <Image> in the app and <img> in the dashboard can't send a token. */
+export const cafePhoto: RequestHandler = async (req, res) => {
+  const id = objectId.safeParse(req.params.id)
+  const photo = id.success ? await CafePhotoModel.findById(id.data).select("data contentType") : null
+  if (!photo) throw new HttpError(404, "Photo introuvable")
+  res.set({
+    "Content-Type": photo.contentType,
+    // A photo never changes: a new one gets a new id.
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Cross-Origin-Resource-Policy": "cross-origin",
+  })
+  res.send(photo.data)
+}
+
 /** "Tu es gérant d'un café ?" form: the café waits for the team's check. */
 export const submitCafe: RequestHandler = async (req, res) => {
   const input = cafeSchema.parse(req.body)
@@ -147,7 +196,7 @@ export const submitCafe: RequestHandler = async (req, res) => {
     throw new HttpError(429, "Tu as déjà plusieurs demandes en attente : l’équipe les vérifie au plus vite")
   }
 
-  const cafe = await CafeModel.create({ ...input, ...location, status: "pending", submittedBy: userId })
+  const cafe = await createCafe(input, { ...location, status: "pending", submittedBy: userId })
   res.status(201).json({ cafe: { id: String(cafe._id), status: cafe.status } })
 }
 
@@ -197,8 +246,7 @@ export const adminListCafes: RequestHandler = async (req, res) => {
 export const adminCreateCafe: RequestHandler = async (req, res) => {
   const input = cafeSchema.parse(req.body)
   const location = await resolveLocation(input.governorate, input.delegation)
-  const cafe = await CafeModel.create({
-    ...input,
+  const cafe = await createCafe(input, {
     ...location,
     status: "approved",
     reviewedBy: req.admin!._id,
@@ -207,8 +255,9 @@ export const adminCreateCafe: RequestHandler = async (req, res) => {
   res.status(201).json({ cafe: presentAdminCafe(cafe.toObject()) })
 }
 
+/** Photo: absent keeps it, null removes it, base64 replaces it. */
 export const adminUpdateCafe: RequestHandler = async (req, res) => {
-  const input = cafeUpdateSchema.parse(req.body)
+  const { photo, ...input } = cafeUpdateSchema.parse(req.body)
   const cafe = await CafeModel.findById(req.params.id)
   if (!cafe) throw new HttpError(404, "Café introuvable")
 
@@ -216,8 +265,16 @@ export const adminUpdateCafe: RequestHandler = async (req, res) => {
     input.governorate || input.delegation
       ? await resolveLocation(input.governorate ?? cafe.governorate, input.delegation ?? cafe.delegation)
       : {}
-  cafe.set({ ...input, ...location })
-  await cafe.save()
+  const oldPhoto = photo !== undefined ? cafe.photo : null
+  const newPhoto = photo ? await savePhoto(photo) : null
+  cafe.set({ ...input, ...location, ...(photo !== undefined ? { photo: newPhoto } : {}) })
+  try {
+    await cafe.save()
+  } catch (err) {
+    if (newPhoto) await CafePhotoModel.deleteOne({ _id: newPhoto })
+    throw err
+  }
+  if (oldPhoto) await CafePhotoModel.deleteOne({ _id: oldPhoto })
   await cafe.populate("submittedBy", "firstName lastName email")
   res.json({ cafe: presentAdminCafe(cafe.toObject()) })
 }
@@ -264,5 +321,6 @@ export const adminSetCafeStatus: RequestHandler = async (req, res) => {
 export const adminDeleteCafe: RequestHandler = async (req, res) => {
   const deleted = await CafeModel.findByIdAndDelete(req.params.id)
   if (!deleted) throw new HttpError(404, "Café introuvable")
+  if (deleted.photo) await CafePhotoModel.deleteOne({ _id: deleted.photo })
   res.json({ ok: true })
 }

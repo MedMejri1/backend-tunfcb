@@ -1,6 +1,7 @@
 import { Types, type HydratedDocument } from "mongoose"
 import { HttpError } from "../../middlewares/errorHandler.js"
 import { startOfDay } from "../../utils/dates.js"
+import { decodeImage } from "../../utils/images.js"
 import { NotificationModel } from "../notifications/notification.model.js"
 import { pushToUsers } from "../push/push.service.js"
 import type { LevelDefinition } from "../settings/settings.schemas.js"
@@ -28,7 +29,6 @@ export type ModerationAction = "hide" | "restore" | "dismiss"
 const MAX_COMMENTS_PER_HOUR = 60
 // A burst of comments on one post sends a single notification.
 const COMMENT_NOTIFY_EVERY_MS = 15 * 60_000
-const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024
 
 export const wallImageUrl = (id: Types.ObjectId | string) => `/api/wall/images/${id}`
 
@@ -127,16 +127,66 @@ async function assertCanWrite(user: UserDocument) {
 
 // ------------------------------------------------------------ Posts
 
-export async function listFeed(viewerId: Types.ObjectId, { before, limit }: { before?: string; limit: number }) {
-  const filter = { status: "published" as const, ...(before ? { _id: { $lt: new Types.ObjectId(before) } } : {}) }
-  const posts = await WallPostModel.find(filter)
-    .sort({ _id: -1 })
-    .limit(limit + 1)
-    .lean<PostDoc[]>()
+/** recent: newest first. relevant: engagement weighted by freshness. top: most engagement this week. */
+export const FEED_SORTS = ["recent", "relevant", "top"] as const
+export type FeedSort = (typeof FEED_SORTS)[number]
+export const FEED_FILTERS = ["all", "photos", "mine"] as const
+export type FeedFilter = (typeof FEED_FILTERS)[number]
+
+// Ranked feeds only look this far back: an old post never climbs back to the top.
+const RANKED_WINDOW_DAYS: Record<Exclude<FeedSort, "recent">, number> = { relevant: 30, top: 7 }
+
+export interface FeedQuery {
+  sort: FeedSort
+  filter: FeedFilter
+  /** recent: id of the last post sent. Ranked feeds: number of posts already sent. */
+  cursor?: string
+  limit: number
+}
+
+export async function listFeed(viewerId: Types.ObjectId, { sort, filter, cursor, limit }: FeedQuery) {
+  const match: Record<string, unknown> = { status: "published" }
+  if (filter === "photos") match["images.0"] = { $exists: true }
+  if (filter === "mine") match.author = viewerId
+
+  if (sort === "recent") {
+    if (cursor) match._id = { $lt: new Types.ObjectId(cursor) }
+    const posts = await WallPostModel.find(match)
+      .sort({ _id: -1 })
+      .limit(limit + 1)
+      .lean<PostDoc[]>()
+    const page = posts.slice(0, limit)
+    return {
+      items: await presentPostsFor(viewerId, page),
+      nextCursor: posts.length > limit ? String(page[page.length - 1]._id) : null,
+    }
+  }
+
+  // Scores move between two pages, so ranked feeds page by position (the app drops repeats).
+  const offset = Number(cursor) || 0
+  const now = new Date()
+  match.createdAt = { $gte: new Date(now.getTime() - RANKED_WINDOW_DAYS[sort] * 86_400_000) }
+  // A comment takes more effort than a reaction: it counts double.
+  const engagement = { $add: ["$reactionsCount", { $multiply: ["$commentsCount", 2] }] }
+  const ageHours = { $divide: [{ $subtract: [now, "$createdAt"] }, 3_600_000] }
+  // Hacker News style, gentler decay (1.2): a fresh post with a few reactions beats an
+  // old popular one, but a post nobody reacted to scores 0 and only follows, newest first.
+  const score =
+    sort === "top"
+      ? engagement
+      : { $divide: [engagement, { $pow: [{ $add: [ageHours, 2] }, 1.2] }] }
+  const posts = await WallPostModel.aggregate<PostDoc>([
+    { $match: match },
+    { $addFields: { score } },
+    { $sort: { score: -1, _id: -1 } },
+    { $skip: offset },
+    { $limit: limit + 1 },
+    { $project: { score: 0 } },
+  ])
   const page = posts.slice(0, limit)
   return {
     items: await presentPostsFor(viewerId, page),
-    nextCursor: posts.length > limit ? String(page[page.length - 1]._id) : null,
+    nextCursor: posts.length > limit ? String(offset + limit) : null,
   }
 }
 
@@ -146,21 +196,6 @@ export async function getPost(viewerId: Types.ObjectId, postId: string) {
   if (!post) throw postNotFound()
   const [presented] = await presentPostsFor(viewerId, [post])
   return presented
-}
-
-const SIGNATURES: Array<[contentType: string, test: (b: Buffer) => boolean]> = [
-  ["image/jpeg", (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
-  ["image/png", (b) => b.readUInt32BE(0) === 0x89504e47],
-  ["image/webp", (b) => b.toString("ascii", 0, 4) === "RIFF" && b.toString("ascii", 8, 12) === "WEBP"],
-]
-
-/** Base64 photo from the app, checked by its actual bytes (not a declared type). */
-function decodeImage(base64: string) {
-  const data = Buffer.from(base64, "base64")
-  const contentType = data.length >= 12 ? SIGNATURES.find(([, test]) => test(data))?.[0] : undefined
-  if (!contentType) throw new HttpError(400, "Photo invalide : JPG, PNG ou WebP attendu")
-  if (data.length > MAX_IMAGE_BYTES) throw new HttpError(413, "Photo trop lourde (1,5 Mo maximum)")
-  return { data, contentType }
 }
 
 export interface NewPostInput {

@@ -32,6 +32,12 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return
   }
 
+  // Body over the parser's limit (e.g. photos too heavy)
+  if ((err as { type?: string }).type === "entity.too.large") {
+    res.status(413).json({ error: "Envoi trop lourd : réduis la taille des photos" })
+    return
+  }
+
   // Duplicate key (unique index)
   if ((err as { code?: number }).code === 11000) {
     const fields = Object.keys((err as { keyValue?: object }).keyValue ?? {})
