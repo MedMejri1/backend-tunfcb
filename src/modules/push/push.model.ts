@@ -27,6 +27,18 @@ const pushLogSchema = new Schema(
 
 export const PushLogModel = model("PushLog", pushLogSchema)
 
+/** Phones used without an account: they only receive the match pushes. */
+const guestDeviceSchema = new Schema(
+  {
+    token: { type: String, required: true, unique: true },
+    matches: { type: Boolean, default: true },
+    lastSeenAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true },
+)
+
+export const GuestDeviceModel = model("GuestDevice", guestDeviceSchema)
+
 const isDuplicate = (err: unknown) => (err as { code?: number }).code === 11000
 
 /** True for the first caller only: marks this match's `field` push as sent. */

@@ -46,6 +46,13 @@ export const requireUser: RequestHandler = async (req, _res, next) => {
   next()
 }
 
+/**
+ * Mobile routes also open to guests (no account): without a token the request
+ * goes on with no `req.appUser`; a token, when sent, gets the requireUser checks.
+ */
+export const optionalUser: RequestHandler = (req, res, next) =>
+  bearer(req.headers.authorization) ? requireUser(req, res, next) : next()
+
 /** Dashboard routes: valid admin token for an active admin account. */
 export const requireAdmin: RequestHandler = async (req, _res, next) => {
   const token = bearer(req.headers.authorization)

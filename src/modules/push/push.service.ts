@@ -1,6 +1,7 @@
 import type { Types } from "mongoose"
 import { env } from "../../config/env.js"
 import { UserModel } from "../users/user.model.js"
+import { GuestDeviceModel } from "./push.model.js"
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 // Expo accepts at most 100 messages per request.
@@ -65,6 +66,7 @@ export async function sendPush(messages: Array<PushContent & { to: string }>): P
       })
       if (unregistered.length) {
         await UserModel.updateMany({ expoPushToken: { $in: unregistered } }, { $unset: { expoPushToken: 1 } })
+        await GuestDeviceModel.deleteMany({ token: { $in: unregistered } })
       }
     } catch (err) {
       console.error("[push] envoi impossible :", (err as Error).message)
@@ -104,5 +106,12 @@ export async function pushToUsers(
     const content = build(user)
     if (content) messages.push({ ...content, to: user.expoPushToken })
   }
+  return messages.length ? sendPush(messages) : 0
+}
+
+/** Match pushes also reach the phones used as a guest (unless they turned them off). */
+export async function pushToGuests(content: PushContent): Promise<number> {
+  const devices = await GuestDeviceModel.find({ matches: { $ne: false } }).select("token").lean()
+  const messages = devices.filter((d) => isExpoPushToken(d.token)).map((d) => ({ ...content, to: d.token }))
   return messages.length ? sendPush(messages) : 0
 }

@@ -14,15 +14,16 @@ const querySchema = z.object({
 /** Mobile: leaderboard + the caller's own position. */
 export const appLeaderboard: RequestHandler = async (req, res) => {
   const q = querySchema.parse(req.query)
-  const user = req.appUser!
-  const country = q.scope === "national" ? user.country : undefined
+  // Guests (no account) see the board without a position of their own.
+  const user = req.appUser
+  const country = q.scope === "national" ? (user?.country ?? "TN") : undefined
   const [board, me] = await Promise.all([
     getLeaderboard({ period: q.period, country, page: q.page, limit: q.limit }),
-    getUserPosition(user._id, q.period, country),
+    user ? getUserPosition(user._id, q.period, country) : null,
   ])
   res.json({
     ...paginated(
-      board.items.map((e) => ({ ...e, isCurrentUser: e.userId === user.id })),
+      board.items.map((e) => ({ ...e, isCurrentUser: !!user && e.userId === user.id })),
       board.total,
       q.page,
       q.limit,

@@ -6,7 +6,7 @@ import { QuizAttemptModel } from "../games/quiz/quiz.model.js"
 import { BARCA_ESPN_ID, fetchBarcaFixtures, type EspnFixture } from "../games/predictions/espn.js"
 import { syncPredictionMatches } from "../games/predictions/predictions.service.js"
 import { claimDailyPush, claimMatchAlert, PushLogModel } from "./push.model.js"
-import { pushToUsers, type PushRecipient } from "./push.service.js"
+import { pushToGuests, pushToUsers, type PushContent, type PushRecipient } from "./push.service.js"
 
 const TICK_MS = 60_000
 const MINUTE = 60_000
@@ -39,6 +39,10 @@ async function refreshFixtures(now: number) {
   fixturesFetchedAt = now
 }
 
+/** Match pushes: members who keep match alerts on, and guest phones. */
+const pushMatch = async (content: PushContent) =>
+  (await pushToUsers({ preference: "matches" }, () => content)) + (await pushToGuests(content))
+
 async function matchReminders(now: number, settings: Settings) {
   const { enabled, minutesBefore } = settings.push.matchReminder
   if (!enabled) return
@@ -48,12 +52,12 @@ async function matchReminders(now: number, settings: Settings) {
     if (!(await claimMatchAlert(f.espnEventId, "reminderSentAt"))) continue
 
     const minutes = Math.round(msLeft / MINUTE)
-    const sent = await pushToUsers({ preference: "matches" }, () => ({
+    const sent = await pushMatch({
       channel: "matches",
       title: minutes >= 1 ? `⏱️ Coup d'envoi dans ${minutes} min` : "⚽ Coup d'envoi !",
       body: `${teamName(f.home)} – ${teamName(f.away)} · ${f.competition}. Allez Barça ! 🔵🔴`,
       data: { type: "match", matchId: f.espnEventId },
-    }))
+    })
     console.log(`[push] rappel avant-match ${f.espnEventId} → ${sent} appareil(s)`)
   }
 }
@@ -76,12 +80,12 @@ async function matchEnds(now: number, settings: Settings) {
     const score = `${teamName(f.home)} ${f.home.score}-${f.away.score} ${teamName(f.away)}`
 
     await NotificationModel.create({ category: "match", title, message: `${score} (${f.competition}).`, ref: f.espnEventId })
-    const sent = await pushToUsers({ preference: "matches" }, () => ({
+    const sent = await pushMatch({
       channel: "matches",
       title,
       body: `${score}. Découvre les points de tes pronostics 🎯`,
       data: { type: "match", matchId: f.espnEventId },
-    }))
+    })
     console.log(`[push] fin de match ${f.espnEventId} → ${sent} appareil(s)`)
   }
 }

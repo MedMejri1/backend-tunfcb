@@ -1,7 +1,8 @@
 import express, { Router } from "express"
 import mongoose from "mongoose"
 
-import { requireAdmin, requireAdminRole, requireUser } from "../middlewares/auth.js"
+import { optionalUser, requireAdmin, requireAdminRole, requireUser } from "../middlewares/auth.js"
+import { rateLimit } from "express-rate-limit"
 import { adminAuthRouter, adminsRouter } from "../modules/admins/admin.routes.js"
 import { authRouter } from "../modules/auth/auth.routes.js"
 import { gamesRouter } from "../modules/games/games.routes.js"
@@ -20,6 +21,15 @@ import * as usersAdmin from "../modules/users/user.admin.controller.js"
 import { myReferrals, myStats, myTransactions } from "../modules/users/user.controller.js"
 
 const router = Router()
+
+// Guest phones register without an account: calls are capped per IP.
+const guestLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Trop de requêtes, réessaie dans quelques minutes" },
+})
 
 const dbStates: Record<number, string> = {
   0: "disconnected",
@@ -42,7 +52,8 @@ router.get("/health", (_req, res) => {
 router.get("/app/config", appConfigHandler)
 router.use("/auth", authRouter)
 router.use("/games", gamesRouter)
-router.get("/leaderboard", requireUser, appLeaderboard)
+// Open to guests (no account): read-only content.
+router.get("/leaderboard", optionalUser, appLeaderboard)
 router.get("/me/transactions", requireUser, myTransactions)
 router.get("/me/referrals", requireUser, myReferrals)
 router.get("/me/stats", requireUser, myStats)
@@ -51,13 +62,15 @@ router.post("/notifications/read-all", requireUser, notifications.markAllRead)
 router.put("/me/push-token", requireUser, push.savePushToken)
 router.delete("/me/push-token", requireUser, push.deletePushToken)
 router.patch("/me/notification-prefs", requireUser, push.updateNotificationPrefs)
+router.put("/guest/push-token", guestLimiter, push.saveGuestPushToken)
+router.delete("/guest/push-token", guestLimiter, push.deleteGuestPushToken)
 router.get("/shop", requireUser, shop.getShop)
 router.get("/shop/products/:id", requireUser, shop.getProduct)
 router.post("/shop/orders", requireUser, shop.placeOrder)
 router.get("/shop/orders", requireUser, shop.myOrders)
 router.get("/shop/orders/:id", requireUser, shop.myOrder)
 router.post("/shop/orders/:id/cancel", requireUser, shop.cancelMyOrder)
-router.get("/team/injuries", requireUser, team.teamInjuries)
+router.get("/team/injuries", team.teamInjuries)
 router.get("/support", requireUser, support.myTickets)
 router.post("/support", requireUser, support.createMyTicket)
 router.get("/support/:id", requireUser, support.myTicket)
