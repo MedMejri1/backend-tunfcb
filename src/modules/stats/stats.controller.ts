@@ -8,6 +8,13 @@ import { WheelSpinModel } from "../games/wheel/wheel.service.js"
 import { getLeaderboard } from "../leaderboard/leaderboard.service.js"
 import { TransactionModel } from "../points/transaction.model.js"
 import { UserModel } from "../users/user.model.js"
+import { CafeModel } from "../cafes/cafe.model.js"
+import { OrderModel } from "../shop/order.model.js"
+import { SupportTicketModel } from "../support/support.model.js"
+import { WallCommentModel, WallPostModel, WallReactionModel } from "../wall/wall.model.js"
+import { GuestDeviceModel, PushLogModel } from "../push/push.model.js"
+import { InjuryModel } from "../team/injury.model.js"
+import { getSettings } from "../settings/settings.service.js"
 
 const earnedMatch = (since: Date) => ({ createdAt: { $gte: since }, type: { $ne: "spent" }, points: { $gt: 0 } })
 
@@ -17,6 +24,75 @@ async function sumPoints(since: Date): Promise<number> {
     { $group: { _id: null, total: { $sum: "$points" } } },
   ])
   return row?.total ?? 0
+}
+
+/** Work waiting for the team: each count links to its page on the dashboard. */
+async function todoStats() {
+  const [cafesPending, ordersPending, supportOpen, wallReported] = await Promise.all([
+    CafeModel.countDocuments({ status: "pending" }),
+    OrderModel.countDocuments({ status: "pending" }),
+    SupportTicketModel.countDocuments({ status: "open" }),
+    WallPostModel.countDocuments({ $or: [{ pendingReports: { $gt: 0 } }, { pendingCommentReports: { $gt: 0 } }] }),
+  ])
+  return { cafesPending, ordersPending, supportOpen, wallReported }
+}
+
+async function wallStats(today: Date, weekAgo: Date) {
+  const [postsToday, posts7d, comments7d, reactions7d, posters7d, hidden] = await Promise.all([
+    WallPostModel.countDocuments({ createdAt: { $gte: today } }),
+    WallPostModel.countDocuments({ createdAt: { $gte: weekAgo } }),
+    WallCommentModel.countDocuments({ createdAt: { $gte: weekAgo } }),
+    WallReactionModel.countDocuments({ createdAt: { $gte: weekAgo } }),
+    WallPostModel.distinct("author", { createdAt: { $gte: weekAgo } }),
+    WallPostModel.countDocuments({ status: "hidden" }),
+  ])
+  return { postsToday, posts7d, comments7d, reactions7d, posters7d: posters7d.length, hidden }
+}
+
+async function cafeStats() {
+  const [approved, byGovernorate] = await Promise.all([
+    CafeModel.countDocuments({ status: "approved" }),
+    CafeModel.aggregate<{ _id: string; count: number }>([
+      { $match: { status: "approved" } },
+      { $group: { _id: "$governorateName", count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: 6 },
+    ]),
+  ])
+  return { approved, byGovernorate: byGovernorate.map((g) => ({ name: g._id, count: g.count })) }
+}
+
+async function shopStats() {
+  const [monthOrders, revenue, { shop }] = await Promise.all([
+    OrderModel.countDocuments({ createdAt: { $gte: startOfPeriod("month") }, status: { $ne: "cancelled" } }),
+    OrderModel.aggregate<{ total: number }>([
+      { $match: { status: "delivered" } },
+      { $group: { _id: null, total: { $sum: "$total" } } },
+    ]),
+    getSettings(),
+  ])
+  return { open: shop.enabled, monthOrders, deliveredRevenue: revenue[0]?.total ?? 0 }
+}
+
+/** Who the app can reach: phones registered for push, guest-mode phones, the infirmary. */
+async function audienceStats(weekAgo: Date) {
+  const [pushMembers, guests, guestsActive7d, lastReminder, injured] = await Promise.all([
+    UserModel.countDocuments({ status: "active", expoPushToken: { $exists: true, $ne: null } }),
+    GuestDeviceModel.countDocuments(),
+    GuestDeviceModel.countDocuments({ lastSeenAt: { $gte: weekAgo } }),
+    PushLogModel.findOne().sort({ createdAt: -1 }).lean(),
+    InjuryModel.countDocuments({ active: true }),
+  ])
+  return {
+    pushMembers,
+    guests,
+    guestsActive7d,
+    // key = "morning:2026-10-17" / "evening:…"
+    lastReminder: lastReminder
+      ? { kind: lastReminder.key.split(":")[0], sent: lastReminder.sent, at: lastReminder.createdAt }
+      : null,
+    injured,
+  }
 }
 
 export const overview: RequestHandler = async (req, res) => {
@@ -48,6 +124,12 @@ export const overview: RequestHandler = async (req, res) => {
     pointsByType,
     topWeek,
     recentUsers,
+    wallSeries,
+    todo,
+    wall,
+    cafes,
+    shop,
+    audience,
   ] = await Promise.all([
     UserModel.countDocuments(),
     UserModel.countDocuments({ status: "banned" }),
@@ -81,6 +163,15 @@ export const overview: RequestHandler = async (req, res) => {
     ]),
     getLeaderboard({ period: "week", page: 1, limit: 5 }),
     UserModel.find().sort({ createdAt: -1 }).limit(6).select("firstName lastName username country createdAt").lean(),
+    WallPostModel.aggregate<{ _id: string; count: number }>([
+      { $match: { createdAt: { $gte: since } } },
+      { $group: { _id: dateKey, count: { $sum: 1 } } },
+    ]),
+    todoStats(),
+    wallStats(today, day(6)),
+    cafeStats(),
+    shopStats(),
+    audienceStats(day(6)),
   ])
 
   const timeseries = Array.from({ length: days }, (_, i) => {
@@ -91,6 +182,7 @@ export const overview: RequestHandler = async (req, res) => {
       signups: signupsSeries.find((s) => s._id === key)?.count ?? 0,
       points: pts?.points ?? 0,
       players: pts?.players ?? 0,
+      posts: wallSeries.find((w) => w._id === key)?.count ?? 0,
     }
   })
 
@@ -103,6 +195,11 @@ export const overview: RequestHandler = async (req, res) => {
       distributed30d,
     },
     games: { quizToday, wheelToday, adsToday, predictionsToday, openMatches },
+    todo,
+    wall,
+    cafes,
+    shop,
+    audience,
     timeseries,
     pointsByType: pointsByType.map((t) => ({ type: t._id, points: t.points, count: t.count })),
     weekStart: startOfPeriod("week"),
