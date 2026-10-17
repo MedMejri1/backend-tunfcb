@@ -15,6 +15,7 @@ import { WheelSpinModel } from "../games/wheel/wheel.service.js"
 import { NotificationModel } from "../notifications/notification.model.js"
 import { deleteOrdersOfUser } from "../shop/shop.service.js"
 import { SupportTicketModel } from "../support/support.model.js"
+import { deleteWallDataOfUser } from "../wall/wall.service.js"
 import { UserModel, type User } from "./user.model.js"
 
 type LeanUser = User & { _id: Types.ObjectId; createdAt: Date; updatedAt: Date }
@@ -236,6 +237,7 @@ export const deleteUser: RequestHandler = async (req, res) => {
 
   const predictionMatches = await PredictionModel.find({ user: userId, outcome: "pending" }).distinct("match")
   await deleteOrdersOfUser(userId)
+  await deleteWallDataOfUser(userId)
   await Promise.all([
     TransactionModel.deleteMany({ user: userId }),
     QuizAttemptModel.deleteMany({ user: userId }),

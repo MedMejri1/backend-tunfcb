@@ -25,6 +25,9 @@ export function createApp() {
       },
     }),
   )
+  // A wall post carries up to 3 photos in base64: bigger limit on that route only
+  // (the general parser below skips a body that's already been read).
+  app.post("/api/wall/posts", express.json({ limit: "8mb" }))
   app.use(express.json({ limit: "1mb" }))
 
   if (env.NODE_ENV !== "test") {

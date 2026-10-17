@@ -46,7 +46,7 @@ export const deletePushToken: RequestHandler = async (req, res) => {
   res.json({ ok: true })
 }
 
-const prefsSchema = z.object({ matches: z.boolean(), games: z.boolean() }).partial()
+const prefsSchema = z.object({ matches: z.boolean(), games: z.boolean(), wall: z.boolean() }).partial()
 
 export const updateNotificationPrefs: RequestHandler = async (req, res) => {
   const input = prefsSchema.parse(req.body)
@@ -56,6 +56,7 @@ export const updateNotificationPrefs: RequestHandler = async (req, res) => {
     notificationPrefs: {
       matches: user?.notificationPrefs?.matches ?? true,
       games: user?.notificationPrefs?.games ?? true,
+      wall: user?.notificationPrefs?.wall ?? true,
     },
   })
 }

@@ -1,6 +1,6 @@
 import { Schema, model, type InferSchemaType, Types } from "mongoose"
 
-export const NOTIFICATION_CATEGORIES = ["match", "reward", "quiz", "news", "system", "referral", "order", "support"] as const
+export const NOTIFICATION_CATEGORIES = ["match", "reward", "quiz", "news", "system", "referral", "order", "support", "wall"] as const
 
 const notificationSchema = new Schema(
   {

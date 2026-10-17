@@ -5,6 +5,7 @@ import { optionalUser, requireAdmin, requireAdminRole, requireUser } from "../mi
 import { rateLimit } from "express-rate-limit"
 import { adminAuthRouter, adminsRouter } from "../modules/admins/admin.routes.js"
 import { authRouter } from "../modules/auth/auth.routes.js"
+import * as cafes from "../modules/cafes/cafes.controller.js"
 import { gamesRouter } from "../modules/games/games.routes.js"
 import * as gamesAdmin from "../modules/games/games.admin.controller.js"
 import { adminLeaderboard, appLeaderboard } from "../modules/leaderboard/leaderboard.controller.js"
@@ -19,6 +20,8 @@ import * as team from "../modules/team/team.controller.js"
 import { overview } from "../modules/stats/stats.controller.js"
 import * as usersAdmin from "../modules/users/user.admin.controller.js"
 import { myReferrals, myStats, myTransactions } from "../modules/users/user.controller.js"
+import * as wall from "../modules/wall/wall.controller.js"
+import * as wallAdmin from "../modules/wall/wall.admin.controller.js"
 
 const router = Router()
 
@@ -29,6 +32,15 @@ const guestLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: { error: "Trop de requêtes, réessaie dans quelques minutes" },
+})
+
+// Café sign-ups are open to guests: a few per IP and per hour.
+const cafeRequestLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Trop de demandes envoyées, réessaie plus tard" },
 })
 
 const dbStates: Record<number, string> = {
@@ -71,10 +83,27 @@ router.get("/shop/orders", requireUser, shop.myOrders)
 router.get("/shop/orders/:id", requireUser, shop.myOrder)
 router.post("/shop/orders/:id/cancel", requireUser, shop.cancelMyOrder)
 router.get("/team/injuries", team.teamInjuries)
+// Cafés showing the matches: open to guests (a café manager may have no account).
+router.get("/cafes/locations", cafes.cafeLocations)
+router.get("/cafes", cafes.listCafes)
+router.post("/cafes", cafeRequestLimiter, optionalUser, cafes.submitCafe)
 router.get("/support", requireUser, support.myTickets)
 router.post("/support", requireUser, support.createMyTicket)
 router.get("/support/:id", requireUser, support.myTicket)
 router.post("/support/:id/messages", requireUser, support.replyToMyTicket)
+// Fans' wall. Photos are public (an <Image> can't send the token).
+router.get("/wall/images/:id", wall.image)
+router.get("/wall/posts", requireUser, wall.feed)
+router.post("/wall/posts", requireUser, wall.publish)
+router.get("/wall/posts/:id", requireUser, wall.post)
+router.delete("/wall/posts/:id", requireUser, wall.removePost)
+router.put("/wall/posts/:id/reaction", requireUser, wall.react)
+router.delete("/wall/posts/:id/reaction", requireUser, wall.unreact)
+router.get("/wall/posts/:id/comments", requireUser, wall.comments)
+router.post("/wall/posts/:id/comments", requireUser, wall.comment)
+router.post("/wall/posts/:id/report", requireUser, wall.reportPost)
+router.delete("/wall/comments/:id", requireUser, wall.removeComment)
+router.post("/wall/comments/:id/report", requireUser, wall.reportComment)
 
 // ------------------------------------------------------------ Admin dashboard
 
@@ -147,11 +176,28 @@ admin.post("/team/injuries", team.adminCreateInjury)
 admin.patch("/team/injuries/:id", team.adminUpdateInjury)
 admin.delete("/team/injuries/:id", team.adminDeleteInjury)
 
+admin.get("/cafes/summary", cafes.adminCafesSummary)
+admin.get("/cafes", cafes.adminListCafes)
+admin.post("/cafes", cafes.adminCreateCafe)
+admin.patch("/cafes/:id", cafes.adminUpdateCafe)
+admin.post("/cafes/:id/status", cafes.adminSetCafeStatus)
+admin.delete("/cafes/:id", cafes.adminDeleteCafe)
+
 admin.get("/support/summary", support.adminSupportSummary)
 admin.get("/support", support.adminListTickets)
 admin.get("/support/:id", support.adminTicket)
 admin.post("/support/:id/messages", support.adminReply)
 admin.post("/support/:id/status", support.adminSetStatus)
+
+admin.get("/wall/summary", wallAdmin.wallSummary)
+admin.put("/wall/settings", superAdmin, wallAdmin.updateWallSettings)
+admin.get("/wall/posts", wallAdmin.listPosts)
+admin.get("/wall/posts/:id", wallAdmin.getPost)
+admin.post("/wall/posts/:id/moderate", wallAdmin.moderatePostHandler)
+admin.delete("/wall/posts/:id", wallAdmin.deletePostHandler)
+admin.post("/wall/comments/:id/moderate", wallAdmin.moderateCommentHandler)
+admin.delete("/wall/comments/:id", wallAdmin.deleteCommentHandler)
+admin.post("/wall/users/:id/block", wallAdmin.blockUser)
 
 router.use("/admin", admin)
 

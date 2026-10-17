@@ -47,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   predictions: { exactScorePoints: 200, correctOutcomePoints: 50, closeMinutesBeforeKickoff: 0 },
   referral: { referrerPoints: 100, refereePoints: 50 },
   shop: { enabled: false, shippingFee: 7000, freeShippingFrom: 0, maxQuantityPerItem: 5 },
+  wall: { enabled: true, maxPostsPerDay: 10, autoHideReports: 3 },
   push: {
     matchReminder: { enabled: true, minutesBefore: 5 },
     matchEnd: { enabled: true },

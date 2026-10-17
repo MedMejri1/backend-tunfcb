@@ -43,7 +43,11 @@ const userSchema = new Schema(
     notificationPrefs: {
       matches: { type: Boolean, default: true },
       games: { type: Boolean, default: true },
+      // Comments on the supporter's wall posts.
+      wall: { type: Boolean, default: true },
     },
+    // Can still read the fans' wall but no longer post, comment or react.
+    wallBlocked: { type: Boolean, default: false },
     lastNotificationsReadAt: { type: Date },
     lastLoginAt: { type: Date },
     lastActiveAt: { type: Date, index: true },

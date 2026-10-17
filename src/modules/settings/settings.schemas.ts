@@ -74,6 +74,13 @@ export const settingsSchema = z.object({
     freeShippingFrom: z.number().int().min(0),
     maxQuantityPerItem: z.number().int().min(1).max(20),
   }),
+  /** Fans' wall. Closed = the app shows "Bientôt disponible". */
+  wall: z.object({
+    enabled: z.boolean(),
+    maxPostsPerDay: z.number().int().min(1).max(100),
+    /** Distinct reports that take a post or comment off the wall until reviewed (0 = never). */
+    autoHideReports: z.number().int().min(0).max(50),
+  }),
   /** Automatic push notifications (times in APP_TIMEZONE). */
   push: z.object({
     matchReminder: z.object({ enabled: z.boolean(), minutesBefore: z.number().int().min(1).max(120) }),

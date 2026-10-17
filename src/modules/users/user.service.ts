@@ -66,6 +66,7 @@ export async function presentUser(user: UserDocument) {
     notificationPrefs: {
       matches: user.notificationPrefs?.matches ?? true,
       games: user.notificationPrefs?.games ?? true,
+      wall: user.notificationPrefs?.wall ?? true,
     },
   }
 }

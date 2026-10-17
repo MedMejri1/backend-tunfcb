@@ -8,7 +8,7 @@ const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 const CHUNK_SIZE = 100
 
 /** Android channels created by the app (sound and importance per kind). */
-export type PushChannel = "matches" | "games" | "announcements"
+export type PushChannel = "matches" | "games" | "announcements" | "wall"
 
 export interface PushContent {
   title: string
@@ -75,7 +75,7 @@ export async function sendPush(messages: Array<PushContent & { to: string }>): P
   return accepted
 }
 
-export type PushPreference = "matches" | "games"
+export type PushPreference = "matches" | "games" | "wall"
 
 export interface PushRecipient {
   _id: Types.ObjectId
