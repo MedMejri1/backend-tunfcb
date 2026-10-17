@@ -2,18 +2,30 @@ import type { RequestHandler } from "express"
 import { z } from "zod"
 import { HttpError } from "../../middlewares/errorHandler.js"
 import { UserModel } from "../users/user.model.js"
-import { isExpoPushToken } from "./push.service.js"
+import { HAS_DEVICE, forgetTokens, isExpoPushToken } from "./push.service.js"
 import { GuestDeviceModel, MatchAlertModel, PushLogModel } from "./push.model.js"
+
+// Phone + tablet + an old phone…: beyond that, the least recently seen is dropped.
+const MAX_DEVICES = 5
 
 /** Mobile: the device's Expo push token, sent after login and at each launch. */
 export const savePushToken: RequestHandler = async (req, res) => {
   const { token } = z.object({ token: z.string() }).parse(req.body)
   if (!isExpoPushToken(token)) throw new HttpError(400, "Jeton de notification invalide")
   const user = req.appUser!
-  // One device = one account: the previous account (or guest use) on this phone stops receiving.
-  await UserModel.updateMany({ expoPushToken: token, _id: { $ne: user._id } }, { $unset: { expoPushToken: 1 } })
-  await GuestDeviceModel.deleteOne({ token })
-  await UserModel.updateOne({ _id: user._id }, { expoPushToken: token })
+  // One phone = one account: the previous account (or guest use) on this phone stops receiving.
+  await forgetTokens([token])
+  // An account can be open on several phones: each one receives. The legacy single
+  // token joins the list; the token sent now moves to the end (most recently seen).
+  const legacy = isExpoPushToken(user.expoPushToken) && user.expoPushToken !== token ? [user.expoPushToken] : []
+  await UserModel.updateOne({ _id: user._id }, { $pull: { expoPushTokens: { $in: [token, ...legacy] } } })
+  await UserModel.updateOne(
+    { _id: user._id },
+    {
+      $push: { expoPushTokens: { $each: [...legacy, token], $slice: -MAX_DEVICES } },
+      $unset: { expoPushToken: 1 },
+    },
+  )
   res.json({ ok: true })
 }
 
@@ -24,7 +36,7 @@ export const saveGuestPushToken: RequestHandler = async (req, res) => {
   const { token, matches } = guestTokenSchema.parse(req.body)
   if (!isExpoPushToken(token)) throw new HttpError(400, "Jeton de notification invalide")
   // The phone is now used as a guest: no account receives on it anymore.
-  await UserModel.updateMany({ expoPushToken: token }, { $unset: { expoPushToken: 1 } })
+  await forgetTokens([token], true)
   await GuestDeviceModel.updateOne(
     { token },
     { $set: { lastSeenAt: new Date(), ...(matches === undefined ? {} : { matches }) } },
@@ -40,9 +52,20 @@ export const deleteGuestPushToken: RequestHandler = async (req, res) => {
   res.json({ ok: true })
 }
 
-/** Mobile: called on logout so the phone stops receiving this account's pushes. */
+/**
+ * Mobile: called on logout so the phone stops receiving this account's pushes.
+ * The app sends its token and only that phone is removed; versions that send
+ * none remove every phone (the others register again at their next launch).
+ */
 export const deletePushToken: RequestHandler = async (req, res) => {
-  await UserModel.updateOne({ _id: req.appUser!._id }, { $unset: { expoPushToken: 1 } })
+  const { token } = z.object({ token: z.string().optional() }).parse(req.body ?? {})
+  const userId = req.appUser!._id
+  if (token) {
+    await UserModel.updateOne({ _id: userId }, { $pull: { expoPushTokens: token } })
+    await UserModel.updateOne({ _id: userId, expoPushToken: token }, { $unset: { expoPushToken: 1 } })
+  } else {
+    await UserModel.updateOne({ _id: userId }, { $unset: { expoPushToken: 1, expoPushTokens: 1 } })
+  }
   res.json({ ok: true })
 }
 
@@ -63,7 +86,7 @@ export const updateNotificationPrefs: RequestHandler = async (req, res) => {
 
 /** Dashboard: registered devices and the latest automatic pushes. */
 export const adminPushStatus: RequestHandler = async (_req, res) => {
-  const withDevice = { status: "active" as const, expoPushToken: { $exists: true, $ne: null } }
+  const withDevice = { status: "active" as const, ...HAS_DEVICE }
   const [devices, matchesOff, gamesOff, guests, daily, matches] = await Promise.all([
     UserModel.countDocuments(withDevice),
     UserModel.countDocuments({ ...withDevice, "notificationPrefs.matches": false }),

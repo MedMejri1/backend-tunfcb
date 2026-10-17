@@ -38,7 +38,11 @@ const userSchema = new Schema(
     referredBy: { type: Types.ObjectId, ref: "User" },
     referralsCount: { type: Number, default: 0 },
 
+    // Legacy single device (accounts registered before multi-device): moved into
+    // expoPushTokens the next time the app sends its token.
     expoPushToken: { type: String, index: true, sparse: true },
+    // Every phone/tablet signed in to the account, newest last (capped in push.controller).
+    expoPushTokens: { type: [String], default: undefined, index: true },
     // Automatic pushes the user accepts (dashboard announcements always go out).
     notificationPrefs: {
       matches: { type: Boolean, default: true },

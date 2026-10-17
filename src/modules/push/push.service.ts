@@ -27,6 +27,24 @@ interface ExpoTicket {
   details?: { error?: string }
 }
 
+/** Users with at least one registered phone (legacy single token or the list). */
+export const HAS_DEVICE = {
+  $or: [{ expoPushToken: { $exists: true, $ne: null } }, { "expoPushTokens.0": { $exists: true } }],
+}
+
+/** Every token of a user: the list, plus the legacy single one if not moved yet. */
+export const tokensOf = (user: { expoPushToken?: string | null; expoPushTokens?: string[] | null }) =>
+  [...new Set([...(user.expoPushTokens ?? []), ...(user.expoPushToken ? [user.expoPushToken] : [])])].filter(
+    isExpoPushToken,
+  )
+
+/** These phones stop receiving: removed from every account and from the guest list. */
+export async function forgetTokens(tokens: string[], keepGuests = false) {
+  await UserModel.updateMany({ expoPushTokens: { $in: tokens } }, { $pull: { expoPushTokens: { $in: tokens } } })
+  await UserModel.updateMany({ expoPushToken: { $in: tokens } }, { $unset: { expoPushToken: 1 } })
+  if (!keepGuests) await GuestDeviceModel.deleteMany({ token: { $in: tokens } })
+}
+
 /** Sends through Expo's push service; devices that uninstalled the app lose their token. */
 export async function sendPush(messages: Array<PushContent & { to: string }>): Promise<number> {
   let accepted = 0
@@ -64,10 +82,7 @@ export async function sendPush(messages: Array<PushContent & { to: string }>): P
         else if (ticket.details?.error === "DeviceNotRegistered") unregistered.push(chunk[j].to)
         else console.warn("[push] message refusé :", ticket.message)
       })
-      if (unregistered.length) {
-        await UserModel.updateMany({ expoPushToken: { $in: unregistered } }, { $unset: { expoPushToken: 1 } })
-        await GuestDeviceModel.deleteMany({ token: { $in: unregistered } })
-      }
+      if (unregistered.length) await forgetTokens(unregistered)
     } catch (err) {
       console.error("[push] envoi impossible :", (err as Error).message)
     }
@@ -80,7 +95,8 @@ export type PushPreference = "matches" | "games" | "wall"
 export interface PushRecipient {
   _id: Types.ObjectId
   firstName: string
-  expoPushToken: string
+  expoPushToken?: string | null
+  expoPushTokens?: string[] | null
   streak?: { current?: number; lastClaimDay?: string | null }
   games?: { wheelLastSpinAt?: Date | null; adsDay?: string | null; adsCount?: number }
 }
@@ -94,17 +110,22 @@ export async function pushToUsers(
   options: { preference?: PushPreference; userIds?: Array<Types.ObjectId | string> },
   build: (user: PushRecipient) => PushContent | null,
 ): Promise<number> {
-  const filter: Record<string, unknown> = { status: "active", expoPushToken: { $exists: true, $ne: null } }
+  const filter: Record<string, unknown> = { status: "active", ...HAS_DEVICE }
   // Users created before the preferences existed have no value: they accept.
   if (options.preference) filter[`notificationPrefs.${options.preference}`] = { $ne: false }
   if (options.userIds) filter._id = { $in: options.userIds }
 
   const messages: Array<PushContent & { to: string }> = []
-  const users = UserModel.find(filter).select("firstName expoPushToken streak games").lean<PushRecipient[]>().cursor()
+  const users = UserModel.find(filter)
+    .select("firstName expoPushToken expoPushTokens streak games")
+    .lean<PushRecipient[]>()
+    .cursor()
   for await (const user of users) {
-    if (!isExpoPushToken(user.expoPushToken)) continue
+    const tokens = tokensOf(user)
+    if (!tokens.length) continue
     const content = build(user)
-    if (content) messages.push({ ...content, to: user.expoPushToken })
+    // Same message on each of the user's phones.
+    if (content) tokens.forEach((to) => messages.push({ ...content, to }))
   }
   return messages.length ? sendPush(messages) : 0
 }

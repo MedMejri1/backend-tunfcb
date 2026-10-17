@@ -13,6 +13,7 @@ import { OrderModel } from "../shop/order.model.js"
 import { SupportTicketModel } from "../support/support.model.js"
 import { WallCommentModel, WallPostModel, WallReactionModel } from "../wall/wall.model.js"
 import { GuestDeviceModel, PushLogModel } from "../push/push.model.js"
+import { HAS_DEVICE } from "../push/push.service.js"
 import { InjuryModel } from "../team/injury.model.js"
 import { getSettings } from "../settings/settings.service.js"
 
@@ -77,7 +78,7 @@ async function shopStats() {
 /** Who the app can reach: phones registered for push, guest-mode phones, the infirmary. */
 async function audienceStats(weekAgo: Date) {
   const [pushMembers, guests, guestsActive7d, lastReminder, injured] = await Promise.all([
-    UserModel.countDocuments({ status: "active", expoPushToken: { $exists: true, $ne: null } }),
+    UserModel.countDocuments({ status: "active", ...HAS_DEVICE }),
     GuestDeviceModel.countDocuments(),
     GuestDeviceModel.countDocuments({ lastSeenAt: { $gte: weekAgo } }),
     PushLogModel.findOne().sort({ createdAt: -1 }).lean(),
