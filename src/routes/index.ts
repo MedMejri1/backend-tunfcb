@@ -8,6 +8,7 @@ import { gamesRouter } from "../modules/games/games.routes.js"
 import * as gamesAdmin from "../modules/games/games.admin.controller.js"
 import { adminLeaderboard, appLeaderboard } from "../modules/leaderboard/leaderboard.controller.js"
 import * as notifications from "../modules/notifications/notifications.controller.js"
+import * as push from "../modules/push/push.controller.js"
 import { listTransactions } from "../modules/points/transactions.admin.controller.js"
 import { appConfigHandler, getSettingsHandler, updateSettingsHandler } from "../modules/settings/settings.controller.js"
 import * as shopAdmin from "../modules/shop/shop.admin.controller.js"
@@ -47,6 +48,9 @@ router.get("/me/referrals", requireUser, myReferrals)
 router.get("/me/stats", requireUser, myStats)
 router.get("/notifications", requireUser, notifications.myNotifications)
 router.post("/notifications/read-all", requireUser, notifications.markAllRead)
+router.put("/me/push-token", requireUser, push.savePushToken)
+router.delete("/me/push-token", requireUser, push.deletePushToken)
+router.patch("/me/notification-prefs", requireUser, push.updateNotificationPrefs)
 router.get("/shop", requireUser, shop.getShop)
 router.get("/shop/products/:id", requireUser, shop.getProduct)
 router.post("/shop/orders", requireUser, shop.placeOrder)
@@ -106,6 +110,7 @@ admin.post("/predictions/matches/:id/cancel", gamesAdmin.cancelPredictionMatch)
 admin.get("/notifications", notifications.adminListNotifications)
 admin.post("/notifications", notifications.adminCreateNotification)
 admin.delete("/notifications/:id", notifications.adminDeleteNotification)
+admin.get("/push/status", push.adminPushStatus)
 
 admin.get("/shop/summary", shopAdmin.shopSummary)
 admin.put("/shop/settings", superAdmin, shopAdmin.updateShopSettings)

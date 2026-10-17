@@ -4,6 +4,7 @@ import { env } from "./config/env.js"
 import { connectDB, disconnectDB } from "./config/db.js"
 import { seedDefaults } from "./seed/defaults.js"
 import { startPredictionSync } from "./modules/games/predictions/predictions.service.js"
+import { startPushScheduler } from "./modules/push/push.scheduler.js"
 
 async function bootstrap() {
   await connectDB()
@@ -14,6 +15,7 @@ async function bootstrap() {
   server.listen(env.PORT, () => {
     console.log(`[server] API prête → http://localhost:${env.PORT}/api/health`)
     startPredictionSync(env.PREDICTIONS_SYNC_MINUTES)
+    if (env.PUSH_SCHEDULER === "true") startPushScheduler()
   })
 
   const shutdown = (signal: string) => {

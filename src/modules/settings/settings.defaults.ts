@@ -47,4 +47,10 @@ export const DEFAULT_SETTINGS: Settings = {
   predictions: { exactScorePoints: 200, correctOutcomePoints: 50, closeMinutesBeforeKickoff: 0 },
   referral: { referrerPoints: 100, refereePoints: 50 },
   shop: { enabled: false, shippingFee: 7000, freeShippingFrom: 0, maxQuantityPerItem: 5 },
+  push: {
+    matchReminder: { enabled: true, minutesBefore: 5 },
+    matchEnd: { enabled: true },
+    morning: { enabled: true, time: "10:00" },
+    evening: { enabled: true, time: "20:00" },
+  },
 }

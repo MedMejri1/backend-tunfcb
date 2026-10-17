@@ -3,6 +3,7 @@ import { z } from "zod"
 import { HttpError } from "../../middlewares/errorHandler.js"
 import { paginated, paginationSchema } from "../../utils/pagination.js"
 import { UserModel } from "../users/user.model.js"
+import { pushToUsers } from "../push/push.service.js"
 import { NOTIFICATION_CATEGORIES, NotificationModel } from "./notification.model.js"
 
 /** Mobile: broadcasts + personal notifications, newest first. */
@@ -54,6 +55,8 @@ const createSchema = z.object({
   message: z.string().trim().min(2).max(1000),
   category: z.enum(NOTIFICATION_CATEGORIES).default("system"),
   userId: z.string().regex(/^[a-f0-9]{24}$/i).optional(),
+  // Also show it as a phone notification (not only in the app's list).
+  push: z.boolean().default(true),
 })
 
 export const adminListNotifications: RequestHandler = async (req, res) => {
@@ -97,10 +100,18 @@ export const adminListNotifications: RequestHandler = async (req, res) => {
 }
 
 export const adminCreateNotification: RequestHandler = async (req, res) => {
-  const { userId, ...input } = createSchema.parse(req.body)
+  const { userId, push, ...input } = createSchema.parse(req.body)
   if (userId && !(await UserModel.exists({ _id: userId }))) throw new HttpError(404, "Utilisateur introuvable")
   const notification = await NotificationModel.create({ ...input, user: userId, createdBy: req.admin!._id })
-  res.status(201).json({ id: String(notification._id) })
+  const pushed = push
+    ? await pushToUsers({ userIds: userId ? [userId] : undefined }, () => ({
+        channel: "announcements",
+        title: input.title,
+        body: input.message,
+        data: { type: "notification", id: String(notification._id) },
+      }))
+    : 0
+  res.status(201).json({ id: String(notification._id), pushed })
 }
 
 export const adminDeleteNotification: RequestHandler = async (req, res) => {

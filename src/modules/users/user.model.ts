@@ -38,7 +38,12 @@ const userSchema = new Schema(
     referredBy: { type: Types.ObjectId, ref: "User" },
     referralsCount: { type: Number, default: 0 },
 
-    expoPushToken: { type: String },
+    expoPushToken: { type: String, index: true, sparse: true },
+    // Automatic pushes the user accepts (dashboard announcements always go out).
+    notificationPrefs: {
+      matches: { type: Boolean, default: true },
+      games: { type: Boolean, default: true },
+    },
     lastNotificationsReadAt: { type: Date },
     lastLoginAt: { type: Date },
     lastActiveAt: { type: Date, index: true },

@@ -63,5 +63,9 @@ export async function presentUser(user: UserDocument) {
     referralCode: user.referralCode,
     referralsCount: user.referralsCount,
     memberSince: user.createdAt,
+    notificationPrefs: {
+      matches: user.notificationPrefs?.matches ?? true,
+      games: user.notificationPrefs?.games ?? true,
+    },
   }
 }

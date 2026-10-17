@@ -17,6 +17,10 @@ const schema = z.object({
   SUPER_ADMIN_PASSWORD: z.string().min(8),
   APP_TIMEZONE: z.string().default("Africa/Tunis"),
   PREDICTIONS_SYNC_MINUTES: z.coerce.number().int().min(0).default(30),
+  // Optional: required by Expo only if "enhanced push security" is turned on for the project.
+  EXPO_ACCESS_TOKEN: z.string().optional(),
+  // Set to "false" to stop this instance from sending the automatic pushes.
+  PUSH_SCHEDULER: z.enum(["true", "false"]).default("true"),
   // Product photos uploaded from the dashboard (served under /api/uploads).
   UPLOAD_DIR: z.string().default("uploads"),
 })

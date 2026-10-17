@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Couleur hexadécimale attendue (#RRGGBB)")
+const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Heure attendue au format HH:MM")
 
 export const settingsSchema = z.object({
   levels: z
@@ -72,6 +73,13 @@ export const settingsSchema = z.object({
     shippingFee: z.number().int().min(0),
     freeShippingFrom: z.number().int().min(0),
     maxQuantityPerItem: z.number().int().min(1).max(20),
+  }),
+  /** Automatic push notifications (times in APP_TIMEZONE). */
+  push: z.object({
+    matchReminder: z.object({ enabled: z.boolean(), minutesBefore: z.number().int().min(1).max(120) }),
+    matchEnd: z.object({ enabled: z.boolean() }),
+    morning: z.object({ enabled: z.boolean(), time: clock }),
+    evening: z.object({ enabled: z.boolean(), time: clock }),
   }),
 })
 
