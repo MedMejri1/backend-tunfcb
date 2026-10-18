@@ -74,12 +74,18 @@ export const myStats: RequestHandler = async (req, res) => {
 
 const historySchema = paginationSchema.extend({
   type: z.enum(TRANSACTION_TYPES).optional(),
+  // "Gagnés" / "Dépensés" tabs: filtered here so each page is full.
+  direction: z.enum(["earned", "spent"]).optional(),
 })
 
-/** Mobile: the user's points history. */
+/** Mobile: the user's points history, newest first, page by page. */
 export const myTransactions: RequestHandler = async (req, res) => {
-  const { page, limit, type } = historySchema.parse(req.query)
-  const filter = { user: req.appUser!._id, ...(type ? { type } : {}) }
+  const { page, limit, type, direction } = historySchema.parse(req.query)
+  const filter = {
+    user: req.appUser!._id,
+    ...(type ? { type } : {}),
+    ...(direction ? { points: direction === "earned" ? { $gt: 0 } : { $lt: 0 } } : {}),
+  }
   const [items, total] = await Promise.all([
     TransactionModel.find(filter)
       .sort({ createdAt: -1 })
