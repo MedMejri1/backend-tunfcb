@@ -5,11 +5,26 @@ import { getSettings } from "../../settings/settings.service.js"
 import { NotificationModel } from "../../notifications/notification.model.js"
 import type { UserDocument } from "../../users/user.model.js"
 import { trackEventSafe } from "../missions/missions.service.js"
-import { fetchBarcaFixtures } from "./espn.js"
+import { fetchBarcaFixtures, type EspnFixture } from "./espn.js"
 import { PredictionMatchModel, PredictionModel } from "./prediction.model.js"
 
-// Matches open for predictions this far ahead of kickoff.
+// Matches open for predictions: everything kicking off in the next 21 days,
+// and never fewer than the next 5, so a played match is replaced by the
+// following one right away even when it is weeks ahead (winter break…).
 const OPEN_WINDOW_DAYS = 21
+const MIN_OPEN_MATCHES = 5
+
+/** ESPN ids of the upcoming fixtures that must be open for predictions. */
+export function fixturesToOpen(fixtures: EspnFixture[], now = Date.now()): Set<string> {
+  const horizon = now + OPEN_WINDOW_DAYS * 86_400_000
+  return new Set(
+    fixtures
+      .filter((f) => f.state === "pre" && f.kickoff.getTime() > now)
+      .sort((a, b) => a.kickoff.getTime() - b.kickoff.getTime())
+      .filter((f, i) => i < MIN_OPEN_MATCHES || f.kickoff.getTime() < horizon)
+      .map((f) => f.espnEventId),
+  )
+}
 
 type MatchDoc = Awaited<ReturnType<typeof PredictionMatchModel.findOne>>
 
@@ -88,8 +103,7 @@ export async function cancelMatch(matchId: string) {
  */
 export async function syncPredictionMatches() {
   const fixtures = await fetchBarcaFixtures()
-  const now = Date.now()
-  const horizon = now + OPEN_WINDOW_DAYS * 86_400_000
+  const toOpen = fixturesToOpen(fixtures)
   let created = 0
   let settled = 0
 
@@ -97,7 +111,7 @@ export async function syncPredictionMatches() {
     const existing = await PredictionMatchModel.findOne({ espnEventId: f.espnEventId })
 
     if (!existing) {
-      if (f.state === "pre" && f.kickoff.getTime() > now && f.kickoff.getTime() < horizon) {
+      if (toOpen.has(f.espnEventId)) {
         await PredictionMatchModel.create({
           espnEventId: f.espnEventId,
           competition: f.competition,

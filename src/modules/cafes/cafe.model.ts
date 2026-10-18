@@ -17,6 +17,9 @@ const cafeSchema = new Schema(
     delegationName: { type: String, required: true },
     address: { type: String, required: true, trim: true, maxlength: 160 },
     mapsUrl: { type: String, default: "", trim: true, maxlength: 500 },
+    // Read from mapsUrl when it carries a position. Absent: not looked up yet;
+    // null: the link has none (the delegation's centre stands in for "Près de moi").
+    coords: { type: new Schema({ lat: Number, lng: Number }, { _id: false }), default: undefined },
     screens: { type: Number, default: null, min: 1, max: 50 },
     amenities: [{ type: String, enum: CAFE_AMENITIES }],
     description: { type: String, default: "", trim: true, maxlength: 300 },

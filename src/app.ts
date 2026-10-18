@@ -34,7 +34,13 @@ export function createApp() {
   app.use(express.json({ limit: "1mb" }))
 
   if (env.NODE_ENV !== "test") {
-    app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"))
+    app.use(
+      morgan(env.NODE_ENV === "production" ? "combined" : "dev", {
+        // "Près de moi" carries the phone's position in its URL: never written to the logs.
+        // originalUrl: the router has rewritten req.url by the time the line is written.
+        skip: (req) => (req as express.Request).originalUrl?.startsWith("/api/cafes/nearby") ?? false,
+      }),
+    )
   }
 
   // Product photos: readable from the app and the dashboard (another origin in dev).

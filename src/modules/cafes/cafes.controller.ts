@@ -7,7 +7,8 @@ import { escapeRegex, paginated, paginationSchema } from "../../utils/pagination
 import { NotificationModel } from "../notifications/notification.model.js"
 import { pushToUsers } from "../push/push.service.js"
 import { CAFE_AMENITIES, CAFE_STATUSES, CafeModel, CafePhotoModel, type Cafe, type CafeStatus } from "./cafe.model.js"
-import { getGovernorates, resolveLocation } from "./locations.service.js"
+import { coordsFromMapsUrl } from "./coords.js"
+import { delegationKey, distanceKm, getDelegationCentres, getGovernorates, nearestArea, resolveLocation } from "./locations.service.js"
 
 type CafeDoc = Cafe & { _id: Types.ObjectId; createdAt: Date; updatedAt: Date }
 type Submitter = { _id: Types.ObjectId; firstName: string; lastName: string; email: string }
@@ -103,12 +104,25 @@ async function savePhoto(base64: string) {
   return photo._id
 }
 
+/**
+ * Reads the café's position from its Google Maps link, after the response:
+ * following a short link can take a few seconds.
+ */
+function locateCafe(id: Types.ObjectId, mapsUrl: string) {
+  void coordsFromMapsUrl(mapsUrl)
+    .catch(() => null)
+    .then((coords) => CafeModel.updateOne({ _id: id, mapsUrl }, { $set: { coords } }))
+    .catch((err) => console.error("[cafes] position du café :", (err as Error).message))
+}
+
 /** Creates the café with its photo, without leaving an orphan photo if the café fails. */
 async function createCafe(input: z.infer<typeof cafeSchema>, fields: Partial<Cafe>) {
   const { photo, ...rest } = input
   const photoId = photo ? await savePhoto(photo) : null
   try {
-    return await CafeModel.create({ ...rest, ...fields, photo: photoId })
+    const cafe = await CafeModel.create({ ...rest, ...fields, photo: photoId })
+    locateCafe(cafe._id, cafe.mapsUrl)
+    return cafe
   } catch (err) {
     if (photoId) await CafePhotoModel.deleteOne({ _id: photoId })
     throw err
@@ -154,6 +168,51 @@ export const listCafes: RequestHandler = async (req, res) => {
   res.json({
     items: items.map(presentCafe),
     governorates: counts.map((c) => ({ value: c._id, count: c.count })),
+  })
+}
+
+const nearbySchema = z.object({
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
+})
+
+// Farther than this from any Tunisian locality: the phone isn't in Tunisia.
+const AREA_MAX_KM = 30
+const NEARBY_LIMIT = 50
+
+/**
+ * "Près de moi": approved cafés from the nearest, with their distance. A café
+ * whose Maps link gives its pin is placed exactly; the others at the centre of
+ * their delegation (coordinates of the municipality API), so that distance is
+ * an estimate. The position is only used for this answer, never stored.
+ */
+export const nearbyCafes: RequestHandler = async (req, res) => {
+  const here = nearbySchema.parse(req.query)
+  const [cafes, centres, area] = await Promise.all([
+    CafeModel.find({ status: "approved" }).limit(500).lean<CafeDoc[]>(),
+    getDelegationCentres(),
+    nearestArea(here),
+  ])
+
+  const items = cafes
+    .flatMap((c) => {
+      const exact = c.coords?.lat != null && c.coords.lng != null ? { lat: c.coords.lat, lng: c.coords.lng } : null
+      const point = exact ?? centres.get(delegationKey(c.governorate, c.delegation))
+      if (!point) return []
+      return [{ ...presentCafe(c), distanceKm: Math.round(distanceKm(here, point) * 10) / 10, distancePrecise: !!exact }]
+    })
+    .sort((a, b) => a.distanceKm - b.distanceKm || a.name.localeCompare(b.name, "fr"))
+    .slice(0, NEARBY_LIMIT)
+
+  // Cafés saved before positions were read from the links.
+  for (const c of cafes) if (c.coords === undefined && c.mapsUrl) locateCafe(c._id, c.mapsUrl)
+
+  res.json({
+    area:
+      area && area.distanceKm <= AREA_MAX_KM
+        ? { governorateName: area.governorateName, delegationName: area.delegationName }
+        : null,
+    items,
   })
 }
 
@@ -275,6 +334,7 @@ export const adminUpdateCafe: RequestHandler = async (req, res) => {
     throw err
   }
   if (oldPhoto) await CafePhotoModel.deleteOne({ _id: oldPhoto })
+  if (input.mapsUrl !== undefined) locateCafe(cafe._id, cafe.mapsUrl)
   await cafe.populate("submittedBy", "firstName lastName email")
   res.json({ cafe: presentAdminCafe(cafe.toObject()) })
 }
