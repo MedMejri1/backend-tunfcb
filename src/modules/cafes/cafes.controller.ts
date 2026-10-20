@@ -11,7 +11,7 @@ import { coordsFromMapsUrl } from "./coords.js"
 import { delegationKey, distanceKm, getDelegationCentres, getGovernorates, nearestArea, resolveLocation } from "./locations.service.js"
 
 type CafeDoc = Cafe & { _id: Types.ObjectId; createdAt: Date; updatedAt: Date }
-type Submitter = { _id: Types.ObjectId; firstName: string; lastName: string; email: string }
+type Submitter = { _id: Types.ObjectId; firstName: string; lastName: string; email?: string; phone?: string }
 // submittedBy populated with the supporter's name (or a bare id / nothing).
 type AdminCafeSource = Omit<CafeDoc, "submittedBy"> & { submittedBy?: Submitter | Types.ObjectId | null }
 
@@ -52,7 +52,8 @@ const presentAdminCafe = (c: AdminCafeSource) => ({
       ? {
           id: String(c.submittedBy._id),
           name: `${c.submittedBy.firstName} ${c.submittedBy.lastName}`.trim(),
-          email: c.submittedBy.email,
+          email: c.submittedBy.email ?? null,
+          phone: c.submittedBy.phone ?? null,
         }
       : null,
 })
@@ -284,7 +285,7 @@ export const adminListCafes: RequestHandler = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate("submittedBy", "firstName lastName email")
+      .populate("submittedBy", "firstName lastName email phone")
       .lean<AdminCafeSource[]>(),
     CafeModel.countDocuments(filter),
     CafeModel.aggregate<{ _id: CafeStatus; count: number }>([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
@@ -335,7 +336,7 @@ export const adminUpdateCafe: RequestHandler = async (req, res) => {
   }
   if (oldPhoto) await CafePhotoModel.deleteOne({ _id: oldPhoto })
   if (input.mapsUrl !== undefined) locateCafe(cafe._id, cafe.mapsUrl)
-  await cafe.populate("submittedBy", "firstName lastName email")
+  await cafe.populate("submittedBy", "firstName lastName email phone")
   res.json({ cafe: presentAdminCafe(cafe.toObject()) })
 }
 
@@ -374,7 +375,7 @@ export const adminSetCafeStatus: RequestHandler = async (req, res) => {
     }))
   }
 
-  await cafe.populate("submittedBy", "firstName lastName email")
+  await cafe.populate("submittedBy", "firstName lastName email phone")
   res.json({ cafe: presentAdminCafe(cafe.toObject()) })
 }
 

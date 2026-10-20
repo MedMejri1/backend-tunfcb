@@ -3,11 +3,13 @@ import { createApp } from "./app.js"
 import { env } from "./config/env.js"
 import { connectDB, disconnectDB } from "./config/db.js"
 import { seedDefaults } from "./seed/defaults.js"
+import { migrateUserIndexes } from "./modules/users/user.service.js"
 import { startPredictionSync } from "./modules/games/predictions/predictions.service.js"
 import { startPushScheduler } from "./modules/push/push.scheduler.js"
 
 async function bootstrap() {
   await connectDB()
+  await migrateUserIndexes()
   await seedDefaults()
 
   const server = createServer(createApp())

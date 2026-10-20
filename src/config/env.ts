@@ -10,7 +10,9 @@ const schema = z.object({
   DNS_SERVERS: z.string().optional(),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   JWT_SECRET: z.string().min(32, "JWT_SECRET doit faire au moins 32 caractères"),
-  JWT_EXPIRES_IN: z.string().default("30d"),
+  // App sessions slide (requireUser renews the token daily): this is how long a
+  // supporter can stay away from the app before having to log in again.
+  JWT_EXPIRES_IN: z.string().default("365d"),
   ADMIN_JWT_SECRET: z.string().min(32, "ADMIN_JWT_SECRET doit faire au moins 32 caractères"),
   ADMIN_JWT_EXPIRES_IN: z.string().default("12h"),
   SUPER_ADMIN_EMAIL: z.string().email().default("admin@barca.app"),

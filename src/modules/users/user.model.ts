@@ -5,7 +5,11 @@ const userSchema = new Schema(
     firstName: { type: String, required: true, trim: true, maxlength: 60 },
     lastName: { type: String, default: "", trim: true, maxlength: 60 },
     username: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    // Sign-in identifier since 2026-10 (international format, see utils/phone).
+    // Absent on the first accounts, created with an email.
+    phone: { type: String, trim: true },
+    // Optional since 2026-10: never stored empty (unset instead) so the unique index ignores it.
+    email: { type: String, lowercase: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
     city: { type: String, default: "", trim: true },
     country: { type: String, default: "TN", uppercase: true, trim: true },
@@ -60,6 +64,9 @@ const userSchema = new Schema(
   { timestamps: true },
 )
 
+// Unique when present only: an account may have no email (or, for older ones, no phone).
+userSchema.index({ phone: 1 }, { name: "phone_unique", unique: true, partialFilterExpression: { phone: { $type: "string" } } })
+userSchema.index({ email: 1 }, { name: "email_unique", unique: true, partialFilterExpression: { email: { $type: "string" } } })
 userSchema.index({ createdAt: -1 })
 userSchema.index({ country: 1, xp: -1 })
 

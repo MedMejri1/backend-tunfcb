@@ -40,6 +40,19 @@ export async function globalRank(user: Pick<UserDocument, "xp" | "createdAt">): 
   return ahead + 1
 }
 
+/**
+ * Email became optional: the old index made it required-unique for every
+ * account. Dropped at startup once (the new partial ones are created by Mongoose).
+ */
+export async function migrateUserIndexes() {
+  const legacy = (await UserModel.collection.indexes()).find((i) => i.name === "email_1")
+  if (legacy) {
+    await UserModel.collection.dropIndex("email_1")
+    console.log("[users] ancien index email_1 supprimé (email facultatif)")
+  }
+  await UserModel.createIndexes()
+}
+
 /** Profile returned to the mobile app. */
 export async function presentUser(user: UserDocument) {
   const settings = await getSettings()
@@ -48,7 +61,8 @@ export async function presentUser(user: UserDocument) {
     firstName: user.firstName,
     lastName: user.lastName,
     username: user.username,
-    email: user.email,
+    phone: user.phone ?? null,
+    email: user.email ?? null,
     city: user.city,
     country: user.country,
     balance: user.balance,

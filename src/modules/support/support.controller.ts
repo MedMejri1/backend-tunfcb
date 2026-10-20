@@ -73,7 +73,7 @@ export const adminListTickets: RequestHandler = async (req, res) => {
   const words = (search ?? "").split(/\s+/).filter(Boolean).map((w) => ({ $regex: escapeRegex(w), $options: "i" }))
   const userIds = words.length
     ? await UserModel.find({
-        $and: words.map((w) => ({ $or: [{ firstName: w }, { lastName: w }, { email: w }, { username: w }] })),
+        $and: words.map((w) => ({ $or: [{ firstName: w }, { lastName: w }, { email: w }, { phone: w }, { username: w }] })),
       }).distinct("_id")
     : []
   const filter = {
@@ -86,9 +86,9 @@ export const adminListTickets: RequestHandler = async (req, res) => {
       .sort({ lastMessageAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate<{ user: { _id: unknown; firstName: string; lastName: string; email: string } | null }>(
+      .populate<{ user: { _id: unknown; firstName: string; lastName: string; email?: string; phone?: string } | null }>(
         "user",
-        "firstName lastName email",
+        "firstName lastName email phone",
       )
       .lean(),
     SupportTicketModel.countDocuments(filter),
@@ -99,7 +99,7 @@ export const adminListTickets: RequestHandler = async (req, res) => {
     ...paginated(
       items.map((t) => ({
         ...presentTicketSummary(t, "admin"),
-        user: t.user ? { id: String(t.user._id), name: `${t.user.firstName} ${t.user.lastName}`.trim(), email: t.user.email } : null,
+        user: t.user ? { id: String(t.user._id), name: `${t.user.firstName} ${t.user.lastName}`.trim(), email: t.user.email ?? null, phone: t.user.phone ?? null } : null,
       })),
       total,
       page,
@@ -115,7 +115,7 @@ export const adminTicket: RequestHandler = async (req, res) => {
 
   const adminIds = ticket.messages.flatMap((m) => (m.admin ? [m.admin] : []))
   const [user, order, admins, userTickets] = await Promise.all([
-    UserModel.findById(ticket.user).select("firstName lastName email username createdAt").lean(),
+    UserModel.findById(ticket.user).select("firstName lastName email phone username createdAt").lean(),
     ticket.order ? OrderModel.findById(ticket.order).select("number status total").lean() : null,
     AdminModel.find({ _id: { $in: adminIds } }).select("name").lean(),
     SupportTicketModel.countDocuments({ user: ticket.user }),
@@ -130,7 +130,8 @@ export const adminTicket: RequestHandler = async (req, res) => {
         ? {
             id: String(user._id),
             name: `${user.firstName} ${user.lastName}`.trim(),
-            email: user.email,
+            email: user.email ?? null,
+            phone: user.phone ?? null,
             username: user.username,
             memberSince: user.createdAt,
             ticketsCount: userTickets,

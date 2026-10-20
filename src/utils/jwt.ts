@@ -4,6 +4,8 @@ import { env } from "../config/env.js"
 export interface UserTokenPayload {
   sub: string
   kind: "user"
+  /** Issued at (seconds), set by jsonwebtoken. */
+  iat?: number
 }
 
 export interface AdminTokenPayload {

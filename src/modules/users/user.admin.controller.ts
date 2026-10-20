@@ -28,7 +28,8 @@ async function presentAdminUser(u: LeanUser) {
     lastName: u.lastName,
     name: [u.firstName, u.lastName].filter(Boolean).join(" "),
     username: u.username,
-    email: u.email,
+    phone: u.phone ?? null,
+    email: u.email ?? null,
     city: u.city,
     country: u.country,
     status: u.status,
@@ -70,7 +71,16 @@ export const listUsers: RequestHandler = async (req, res) => {
   if (q.country) filter.country = q.country
   if (q.search) {
     const rx = new RegExp(escapeRegex(q.search), "i")
-    filter.$or = [{ firstName: rx }, { lastName: rx }, { username: rx }, { email: rx }, { referralCode: rx }]
+    // Phones are stored as +21622123456: "22 123 456" must match too.
+    const digits = q.search.replace(/[\s.\-()]/g, "")
+    filter.$or = [
+      { firstName: rx },
+      { lastName: rx },
+      { username: rx },
+      { email: rx },
+      { referralCode: rx },
+      ...(/^\+?\d{3,}$/.test(digits) ? [{ phone: new RegExp(escapeRegex(digits)) }] : []),
+    ]
   }
 
   const [users, total] = await Promise.all([

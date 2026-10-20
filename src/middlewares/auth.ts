@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express"
-import { verifyAdminToken, verifyUserToken, type AdminRole } from "../utils/jwt.js"
+import { signUserToken, verifyAdminToken, verifyUserToken, type AdminRole } from "../utils/jwt.js"
 import { HttpError } from "./errorHandler.js"
 import { UserModel, type UserDocument } from "../modules/users/user.model.js"
 import { AdminModel, type AdminDocument } from "../modules/admins/admin.model.js"
@@ -18,15 +18,23 @@ const bearer = (header?: string) =>
   header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : null
 
 const ACTIVITY_REFRESH_MS = 5 * 60_000
+// Sliding session: a token older than a day is swapped for a fresh one, sent in
+// this header and saved by the app. A supporter who opens the app at least once
+// per JWT_EXPIRES_IN is never logged out.
+const RENEW_AFTER_SECONDS = 24 * 3600
+export const SESSION_TOKEN_HEADER = "X-Session-Token"
 
 /** Mobile app routes: valid user token, account not banned. */
-export const requireUser: RequestHandler = async (req, _res, next) => {
+export const requireUser: RequestHandler = async (req, res, next) => {
   const token = bearer(req.headers.authorization)
   if (!token) return next(new HttpError(401, "Token manquant"))
 
   let userId: string
+  let issuedAt: number | undefined
   try {
-    userId = verifyUserToken(token).sub
+    const payload = verifyUserToken(token)
+    userId = payload.sub
+    issuedAt = payload.iat
   } catch {
     return next(new HttpError(401, "Session expirée, reconnecte-toi"))
   }
@@ -40,6 +48,9 @@ export const requireUser: RequestHandler = async (req, _res, next) => {
   const now = Date.now()
   if (!user.lastActiveAt || now - user.lastActiveAt.getTime() > ACTIVITY_REFRESH_MS) {
     await UserModel.updateOne({ _id: user._id }, { lastActiveAt: new Date(now) })
+  }
+  if (!issuedAt || now / 1000 - issuedAt > RENEW_AFTER_SECONDS) {
+    res.setHeader(SESSION_TOKEN_HEADER, signUserToken(userId))
   }
 
   req.appUser = user

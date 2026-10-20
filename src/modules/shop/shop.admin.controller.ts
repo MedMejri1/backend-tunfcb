@@ -129,9 +129,9 @@ export const listOrders: RequestHandler = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
-      .populate<{ user: { _id: unknown; firstName: string; lastName: string; email: string } | null }>(
+      .populate<{ user: { _id: unknown; firstName: string; lastName: string; email?: string; phone?: string } | null }>(
         "user",
-        "firstName lastName email",
+        "firstName lastName email phone",
       )
       .lean(),
     OrderModel.countDocuments(filter),
@@ -147,7 +147,7 @@ export const listOrders: RequestHandler = async (req, res) => {
         itemsCount: o.items.reduce((sum, i) => sum + i.quantity, 0),
         customer: { name: o.shipping?.fullName ?? "", phone: o.shipping?.phone ?? "", governorate: o.shipping?.governorate ?? "" },
         user: o.user
-          ? { id: String(o.user._id), name: `${o.user.firstName} ${o.user.lastName}`.trim(), email: o.user.email }
+          ? { id: String(o.user._id), name: `${o.user.firstName} ${o.user.lastName}`.trim(), email: o.user.email ?? null, phone: o.user.phone ?? null }
           : null,
       })),
       total,
@@ -163,7 +163,7 @@ export const getOrder: RequestHandler = async (req, res) => {
 
   const adminIds = order.history.flatMap((h) => (h.admin ? [h.admin] : []))
   const [user, admins] = await Promise.all([
-    UserModel.findById(order.user).select("firstName lastName email username").lean(),
+    UserModel.findById(order.user).select("firstName lastName email phone username").lean(),
     AdminModel.find({ _id: { $in: adminIds } }).select("name").lean(),
   ])
 
@@ -180,7 +180,7 @@ export const getOrder: RequestHandler = async (req, res) => {
       adminNote: order.adminNote ?? "",
       nextStatuses: ORDER_TRANSITIONS[order.status],
       user: user
-        ? { id: String(user._id), name: `${user.firstName} ${user.lastName}`.trim(), email: user.email, username: user.username }
+        ? { id: String(user._id), name: `${user.firstName} ${user.lastName}`.trim(), email: user.email ?? null, phone: user.phone ?? null, username: user.username }
         : null,
     },
   })

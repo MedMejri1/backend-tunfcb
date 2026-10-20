@@ -29,7 +29,8 @@ interface AdminAuthorSource {
   _id: Types.ObjectId
   firstName: string
   lastName?: string | null
-  email: string
+  email?: string
+  phone?: string
   username: string
   status: string
   wallBlocked?: boolean | null
@@ -37,7 +38,7 @@ interface AdminAuthorSource {
 
 async function adminAuthorsOf(ids: Types.ObjectId[]) {
   const users = await UserModel.find({ _id: { $in: ids } })
-    .select("firstName lastName email username status wallBlocked")
+    .select("firstName lastName email phone username status wallBlocked")
     .lean<AdminAuthorSource[]>()
   const byId = new Map(
     users.map((u) => [
@@ -45,7 +46,8 @@ async function adminAuthorsOf(ids: Types.ObjectId[]) {
       {
         id: String(u._id),
         name: [u.firstName, u.lastName].filter(Boolean).join(" "),
-        email: u.email,
+        email: u.email ?? null,
+        phone: u.phone ?? null,
         username: u.username,
         banned: u.status === "banned",
         wallBlocked: Boolean(u.wallBlocked),
@@ -95,7 +97,7 @@ export const listPosts: RequestHandler = async (req, res) => {
     // Every word must match the author (so "Mohamed Mejri" finds first + last name), or the text matches.
     const words = search.split(/\s+/).filter(Boolean).map((w) => ({ $regex: escapeRegex(w), $options: "i" }))
     const authorIds = await UserModel.find({
-      $and: words.map((w) => ({ $or: [{ firstName: w }, { lastName: w }, { email: w }, { username: w }] })),
+      $and: words.map((w) => ({ $or: [{ firstName: w }, { lastName: w }, { email: w }, { phone: w }, { username: w }] })),
     }).distinct("_id")
     conditions.push({ $or: [{ text: { $regex: escapeRegex(search), $options: "i" } }, { author: { $in: authorIds } }] })
   }
